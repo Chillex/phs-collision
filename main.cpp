@@ -25,7 +25,6 @@ int main()
 	FPSCounter fpsCounter("Assets/Font/digital_counter_7.ttf");
 	sf::Color clearColor(38, 11, 1);
 
-	//Triangle movingTriangle = { glm::vec2(-50.0f, -50.0f), glm::vec2(50.0f, 0.0f), glm::vec2(0.0f, 50.0f), glm::vec2(0.0f, 0.0f) };
 	Triangle movingTriangle = Triangle::GenerateRandom({ 100.0f, 100.0f }, { 0.0f, 0.0f });
 
 	int staticTriangleCount = 300;
@@ -104,7 +103,7 @@ int main()
 		movingTriangle.position = { mousePosWorld.x, mousePosWorld.y };
 
 		// test collision between static triangles
-		for (size_t i = 0; i < staticTriangleCount - 1; ++i)
+		for (size_t i = 0; i < staticTriangleCount; ++i)
 		{
 			staticTriangles[i].CalculateCollision(staticTriangles);
 		}
@@ -113,14 +112,14 @@ int main()
 		movingTriangle.CalculateCollision(staticTriangles);
 
 		window.clear(clearColor);
-
+		
 		// draws
 		for (size_t i = 0; i < staticTriangleCount; ++i)
 		{
-			Draw(staticTriangles[i], window);
+			staticTriangles[i].Draw(window);
 		}
 
-		Draw(movingTriangle, window);
+		movingTriangle.Draw(window);
 
 		window.setView(hudView);
 		fpsCounter.Draw(window);
