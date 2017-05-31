@@ -2,6 +2,7 @@
 
 #include <SFML/Graphics.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtx/norm.hpp>
 
 struct CollisionStatus
 {
@@ -37,6 +38,24 @@ struct Triangle {
 	glm::vec2 obbP2;
 	glm::vec2 obbP3;
 
+	CollisionStatus::Enum collisionStatus;
+
+	friend bool operator==(const Triangle& lhs, const Triangle& rhs)
+	{
+		if (lhs.position != rhs.position)
+			return false;
+
+		if (lhs.relativeP0 != rhs.relativeP0 || lhs.relativeP1 != rhs.relativeP1 || lhs.relativeP2 != rhs.relativeP2)
+			return false;
+
+		return true;
+	}
+
+	friend bool operator!=(const Triangle& lhs, const Triangle& rhs)
+	{
+		return !(lhs == rhs);
+	}
+
 	static Triangle GenerateRandom(glm::vec2 size, glm::vec2 position)
 	{
 		Triangle triangle;
@@ -58,6 +77,8 @@ struct Triangle {
 		triangle.CalculateCircumcenter();
 		triangle.CalculateAABB();
 		triangle.CalculateOBB();
+
+		triangle.collisionStatus = CollisionStatus::None;
 
 		return triangle;
 	}
@@ -98,7 +119,7 @@ struct Triangle {
 			otherPoint = relativeP2;
 			line = A;
 		}
-		else if (b > c && b > a)
+		else if (b > c)
 		{
 			obbP0 = relativeP1;
 			obbP1 = relativeP2;
@@ -106,17 +127,13 @@ struct Triangle {
 			otherPoint = relativeP0;
 			line = B;
 		}
-		else if (c > a && c > b)
+		else
 		{
 			obbP0 = relativeP2;
 			obbP1 = relativeP0;
 
 			otherPoint = relativeP1;
 			line = C;
-		}
-		else
-		{
-			printf("no side is the longest for obb...");
 		}
 
 		float distance = DistanceFromLine(obbP0, obbP1, otherPoint);
@@ -132,9 +149,137 @@ struct Triangle {
 	{
 		return std::abs((Q.y - P.y)*X.x - (Q.x - P.x)*X.y + Q.x*P.y - Q.y*P.x) / std::sqrt(std::pow((Q.y - P.y), 2) + std::pow((Q.x - P.x), 2));
 	}
+
+	void CalculateCollision(std::vector<Triangle>& otherTriangles)
+	{
+		collisionStatus = CollisionStatus::None;
+
+		for (size_t i = 0; i < otherTriangles.size(); ++i)
+		{
+			Triangle& other = otherTriangles[i];
+			if (*this == other)
+				continue;
+			
+			// Circle - Circle Collision
+			float distance = glm::distance(position + bCircleCenter, other.position + other.bCircleCenter);
+			bool circleCollision = distance <= (bCircleRadius + other.bCircleRadius);
+
+			if (!circleCollision)
+			{
+				continue;
+			}
+
+			// AABB Collision
+			if (!CheckAABBCollision(other))
+			{
+				if (collisionStatus < CollisionStatus::Circle) collisionStatus = CollisionStatus::Circle;
+				if (other.collisionStatus < CollisionStatus::Circle) other.collisionStatus = CollisionStatus::Circle;
+				continue;
+			}
+
+			// OBB Collision
+			if (!CheckOBBCollision(other))
+			{
+				if (collisionStatus < CollisionStatus::AABB) collisionStatus = CollisionStatus::AABB;
+				if (other.collisionStatus < CollisionStatus::AABB) other.collisionStatus = CollisionStatus::AABB;
+				continue;
+			}
+
+			collisionStatus = CollisionStatus::OBB;
+			other.collisionStatus = CollisionStatus::OBB;
+
+			//// Minkowski
+			//if (!CheckMinkowski(other))
+			//{
+			//	if (collisionStatus < CollisionStatus::OBB) collisionStatus = CollisionStatus::OBB;
+			//	if (other.collisionStatus < CollisionStatus::OBB) other.collisionStatus = CollisionStatus::OBB;
+			//	continue;
+			//}
+
+			//collisionStatus = CollisionStatus::Minkowski;
+			//other.collisionStatus = CollisionStatus::Minkowski;
+		}
+	}
+
+	bool CheckAABBCollision(const Triangle& other) const
+	{
+		float x = position.x + bCircleCenter.x - aabbDimensions.x * 0.5f;
+		float y = position.y + bCircleCenter.y - aabbDimensions.y * 0.5f;
+
+		float otherX = other.position.x + other.bCircleCenter.x - other.aabbDimensions.x * 0.5f;
+		float otherY = other.position.y + other.bCircleCenter.y - other.aabbDimensions.y * 0.5f;
+
+		if (x + aabbDimensions.x < otherX || x > otherX + other.aabbDimensions.x)
+			return false;
+
+		if (y + aabbDimensions.y < otherY || y > otherY + other.aabbDimensions.y)
+			return false;
+
+		return true;
+	}
+
+	bool CheckOBBCollision(const Triangle& other) const
+	{
+		return OBBOverlap(other) && other.OBBOverlap(*this);
+	}
+
+	bool OBBOverlap(const Triangle& other) const
+	{
+		glm::vec2 axis[2] = {
+			glm::normalize((position + obbP1) - (position + obbP0)),
+			glm::normalize((position + obbP3) - (position + obbP0))
+		};
+
+		for (int a = 0; a < 2; ++a)
+		{
+			float tri1Min, tri1Max, tri2Min, tri2Max;
+
+			SATTest(axis[a], { position + obbP0, position + obbP1, position + obbP2, position + obbP3 }, tri1Min, tri1Max);
+			SATTest(axis[a], { other.position + other.obbP0, other.position + other.obbP1, other.position + other.obbP2, other.position + other.obbP3 }, tri2Min, tri2Max);
+
+			if (!Overlaps(tri1Min, tri1Max, tri2Min, tri2Max))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	void SATTest(const glm::vec2& axis, const std::vector<glm::vec2>& points, float& min, float& max) const
+	{
+		min = 99999999;
+		max = -99999999;
+
+		for (size_t i = 0; i < points.size(); ++i)
+		{
+			float dotValue = glm::dot(axis, points[i]);
+			
+			if (dotValue < min)
+				min = dotValue;
+
+			if (dotValue > max)
+				max = dotValue;
+		}
+	}
+
+	bool Overlaps(float min1, float max1, float min2, float max2) const
+	{
+		return IsBetweenOrdered(min2, min1, max1) || IsBetweenOrdered(min1, min2, max2);
+	}
+
+	bool IsBetweenOrdered(float val, float lowerBound, float upperBound) const
+	{
+		return lowerBound <= val && val <= upperBound;
+	}
+
+	bool CheckMinkowski(const Triangle& other)
+	{
+		return false;
+	}
 };
 
-void Draw(const Triangle& triangle, sf::RenderWindow& window, const CollisionStatus::Enum& collisionStatus)
+void Draw(const Triangle& triangle, sf::RenderWindow& window)
 {
 	sf::VertexArray vertices(sf::Triangles, 3);
 
@@ -144,14 +289,26 @@ void Draw(const Triangle& triangle, sf::RenderWindow& window, const CollisionSta
 
 	sf::Color triangleColor(252, 243, 208);
 
-	if (collisionStatus >= CollisionStatus::Circle)
+	if (triangle.collisionStatus >= CollisionStatus::Minkowski)
+	{
+		// draw Minkowski
+		triangleColor = sf::Color::Red;
+	}
+
+	vertices[0].color = triangleColor;
+	vertices[1].color = triangleColor;
+	vertices[2].color = triangleColor;
+
+	window.draw(vertices);
+
+	if (triangle.collisionStatus >= CollisionStatus::Circle)
 	{
 		// draw bounding circle
 		sf::CircleShape bCircle(triangle.bCircleRadius);
 
 		bCircle.setFillColor(sf::Color::Transparent);
 		bCircle.setOutlineColor(sf::Color(242, 170, 107));
-		bCircle.setOutlineThickness(1.0f);
+		bCircle.setOutlineThickness(-1.0f);
 		
 		bCircle.setOrigin(triangle.bCircleRadius, triangle.bCircleRadius);
 		bCircle.setPosition(triangle.position.x + triangle.bCircleCenter.x, triangle.position.y + triangle.bCircleCenter.y);
@@ -159,14 +316,14 @@ void Draw(const Triangle& triangle, sf::RenderWindow& window, const CollisionSta
 		window.draw(bCircle);
 	}
 
-	if (collisionStatus >= CollisionStatus::AABB)
+	if (triangle.collisionStatus >= CollisionStatus::AABB)
 	{
 		// draw AABB
 		sf::RectangleShape aabb({ triangle.aabbDimensions.x, triangle.aabbDimensions.y });
 
 		aabb.setFillColor(sf::Color::Transparent);
 		aabb.setOutlineColor(sf::Color(242, 92, 5));
-		aabb.setOutlineThickness(1.0f);
+		aabb.setOutlineThickness(-1.0f);
 
 		aabb.setOrigin(triangle.aabbDimensions.x * 0.5f, triangle.aabbDimensions.y * 0.5f);
 		aabb.setPosition(triangle.position.x + triangle.bCircleCenter.x, triangle.position.y + triangle.bCircleCenter.y);
@@ -174,7 +331,7 @@ void Draw(const Triangle& triangle, sf::RenderWindow& window, const CollisionSta
 		window.draw(aabb);
 	}
 
-	if (collisionStatus >= CollisionStatus::OBB)
+	if (triangle.collisionStatus >= CollisionStatus::OBB)
 	{
 		// draw OBB
 		sf::ConvexShape oob;
@@ -187,20 +344,8 @@ void Draw(const Triangle& triangle, sf::RenderWindow& window, const CollisionSta
 
 		oob.setFillColor(sf::Color::Transparent);
 		oob.setOutlineColor(sf::Color(242, 68, 5));
-		oob.setOutlineThickness(1.0f);
+		oob.setOutlineThickness(-1.0f);
 
 		window.draw(oob);
 	}
-
-	if (collisionStatus >= CollisionStatus::Minkowski)
-	{
-		// draw Minkowski
-		triangleColor = sf::Color::Red;
-	}
-
-	vertices[0].color = triangleColor;
-	vertices[1].color = triangleColor;
-	vertices[2].color = triangleColor;
-
-	window.draw(vertices);
 }

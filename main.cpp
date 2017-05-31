@@ -28,6 +28,16 @@ int main()
 	//Triangle movingTriangle = { glm::vec2(-50.0f, -50.0f), glm::vec2(50.0f, 0.0f), glm::vec2(0.0f, 50.0f), glm::vec2(0.0f, 0.0f) };
 	Triangle movingTriangle = Triangle::GenerateRandom({ 100.0f, 100.0f }, { 0.0f, 0.0f });
 
+	int staticTriangleCount = 300;
+	std::vector<Triangle> staticTriangles;
+	staticTriangles.reserve(staticTriangleCount);
+	for (int i = 0; i < staticTriangleCount; ++i)
+	{
+		float x = rand() % (1920 * 2) - 960;
+		float y = rand() % (1080 * 2) - 540;
+		staticTriangles.emplace_back(Triangle::GenerateRandom({ 100.0f, 100.0f }, { x, y }));
+	}
+
 	sf::Clock deltaClock;
 	sf::Time dt;
 	while (window.isOpen())
@@ -93,10 +103,24 @@ int main()
 		fpsCounter.Update(dt);
 		movingTriangle.position = { mousePosWorld.x, mousePosWorld.y };
 
+		// test collision between static triangles
+		for (size_t i = 0; i < staticTriangleCount - 1; ++i)
+		{
+			staticTriangles[i].CalculateCollision(staticTriangles);
+		}
+
+		// test collision from the moving triangle
+		movingTriangle.CalculateCollision(staticTriangles);
+
 		window.clear(clearColor);
 
 		// draws
-		Draw(movingTriangle, window, CollisionStatus::None);
+		for (size_t i = 0; i < staticTriangleCount; ++i)
+		{
+			Draw(staticTriangles[i], window);
+		}
+
+		Draw(movingTriangle, window);
 
 		window.setView(hudView);
 		fpsCounter.Draw(window);
